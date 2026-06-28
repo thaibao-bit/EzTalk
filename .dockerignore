@@ -7,5 +7,10 @@ __pycache__
 .coverage
 htmlcov
 .env
+.env.*
 tests
 skills
+data
+*.sqlite
+*.sqlite3
+*.db

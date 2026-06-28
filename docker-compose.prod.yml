@@ -1,0 +1,100 @@
+services:
+  api:
+    image: ghcr.io/thaibao-bit/eztalk:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    expose:
+      - "8080"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@pgbouncer:6432/${POSTGRES_DB:?POSTGRES_DB is required}"
+      DB_POOL_SIZE: "${DB_POOL_SIZE:-5}"
+      DB_MAX_OVERFLOW: "${DB_MAX_OVERFLOW:-10}"
+      REDIS_URL: "redis://redis:6379/0"
+      ENABLE_REDIS_BROADCAST: "true"
+      RUN_DB_INIT_ON_STARTUP: "false"
+      VLLM_BASE_URL: "${VLLM_BASE_URL:?VLLM_BASE_URL is required}"
+      VLLM_MODEL: "${VLLM_MODEL:?VLLM_MODEL is required}"
+      VLLM_API_KEY: "${VLLM_API_KEY:-}"
+      WEB_CONCURRENCY: "${WEB_CONCURRENCY:-}"
+      GUNICORN_KEEP_ALIVE: "${GUNICORN_KEEP_ALIVE:-65}"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  migrate:
+    image: ghcr.io/thaibao-bit/eztalk:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - python
+      - -c
+      - "import asyncio; from app.db.session import init_db; asyncio.run(init_db())"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@pgbouncer:6432/${POSTGRES_DB:?POSTGRES_DB is required}"
+      DB_POOL_SIZE: "${DB_POOL_SIZE:-5}"
+      DB_MAX_OVERFLOW: "${DB_MAX_OVERFLOW:-10}"
+      ENABLE_REDIS_BROADCAST: "false"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER is required}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+      POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB is required}"
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgres.conf"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/postgres.conf:/etc/postgresql/postgres.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  pgbouncer:
+    image: bitnami/pgbouncer:1.24.1
+    environment:
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_USERNAME: "${POSTGRES_USER:?POSTGRES_USER is required}"
+      POSTGRESQL_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+      POSTGRESQL_DATABASE: "${POSTGRES_DB:?POSTGRES_DB is required}"
+      PGBOUNCER_DATABASE: "${POSTGRES_DB:?POSTGRES_DB is required}"
+      PGBOUNCER_PORT: "6432"
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: "${PGBOUNCER_MAX_CLIENT_CONN:-1000}"
+      PGBOUNCER_DEFAULT_POOL_SIZE: "${PGBOUNCER_DEFAULT_POOL_SIZE:-50}"
+      PGBOUNCER_RESERVE_POOL_SIZE: "${PGBOUNCER_RESERVE_POOL_SIZE:-10}"
+      PGBOUNCER_AUTH_TYPE: scram-sha-256
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:

@@ -22,6 +22,11 @@ class Settings:
     vllm_api_key: str | None = None
     vllm_timeout_seconds: float = 120.0
     database_url: str = "sqlite+aiosqlite:///./data/eztalk.db"
+    redis_url: str = "redis://localhost:6379/0"
+    redis_broadcast_enabled: bool = False
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    run_db_init_on_startup: bool = True
 
 
 def get_settings() -> Settings:
@@ -45,6 +50,11 @@ def get_settings() -> Settings:
         vllm_timeout_seconds=_get_float("VLLM_TIMEOUT_SECONDS", 120.0),
         database_url=os.getenv("DATABASE_URL")
         or "sqlite+aiosqlite:///./data/eztalk.db",
+        redis_url=os.getenv("REDIS_URL") or "redis://localhost:6379/0",
+        redis_broadcast_enabled=_get_bool("ENABLE_REDIS_BROADCAST", False),
+        db_pool_size=_get_int("DB_POOL_SIZE", 5),
+        db_max_overflow=_get_int("DB_MAX_OVERFLOW", 10),
+        run_db_init_on_startup=_get_bool("RUN_DB_INIT_ON_STARTUP", True),
     )
 
 
@@ -56,6 +66,13 @@ def _get_int(name: str, default: int) -> int:
 def _get_float(name: str, default: float) -> float:
     value = os.getenv(name)
     return float(value) if value else default
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
 
 
 settings = get_settings()

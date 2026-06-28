@@ -20,7 +20,17 @@ if settings.database_url.startswith("sqlite+aiosqlite:///./"):
     database_path = Path(settings.database_url.removeprefix("sqlite+aiosqlite:///"))
     database_path.parent.mkdir(parents=True, exist_ok=True)
 
-engine = create_async_engine(settings.database_url, echo=False)
+engine_kwargs = {"echo": False, "pool_pre_ping": True}
+if not settings.database_url.startswith("sqlite+"):
+    engine_kwargs.update(
+        {
+            "pool_size": settings.db_pool_size,
+            "max_overflow": settings.db_max_overflow,
+            "connect_args": {"statement_cache_size": 0},
+        }
+    )
+
+engine = create_async_engine(settings.database_url, **engine_kwargs)
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     expire_on_commit=False,

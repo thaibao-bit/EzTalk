@@ -1,30 +1,41 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
+ENV PIP_NO_CACHE_DIR=1 \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH"
 
-WORKDIR /app
+WORKDIR /build
 
-# Install dependencies before application code to maximize Docker layer caching.
 COPY requirements.txt ./
 RUN python -m venv "$VIRTUAL_ENV" \
     && pip install --upgrade pip \
     && pip install --requirement requirements.txt
 
-# Run as an unprivileged user instead of root inside the container.
-RUN addgroup --system app && adduser --system --ingroup app app
 
+FROM python:3.13-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+RUN addgroup --system app \
+    && adduser --system --ingroup app app
+
+COPY --from=builder /opt/venv /opt/venv
 COPY app ./app
 COPY main.py ./main.py
-RUN chown --recursive app:app /app
+COPY scripts/start-gunicorn.sh ./scripts/start-gunicorn.sh
+
+RUN chmod +x ./scripts/start-gunicorn.sh \
+    && chown --recursive app:app /app /opt/venv
 
 USER app
-EXPOSE 8000
+EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./scripts/start-gunicorn.sh"]
