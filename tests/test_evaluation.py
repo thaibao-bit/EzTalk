@@ -10,6 +10,7 @@ import pytest
 
 from app.db.models import MessageRole
 from app.db.session import AsyncSessionLocal
+from app.repositories.auth_repository import create_user
 from app.repositories.message_repository import create_message
 from app.services import evaluation_service
 from main import app
@@ -29,10 +30,13 @@ def test_evaluate_session_posts_transcript_to_vllm_and_returns_json(
 ) -> None:
     session_id = f"evaluation-session-{uuid4()}"
     user_id = f"evaluation-user-{uuid4()}"
+    api_key = f"key-{uuid4()}"
     captured_payloads: list[dict] = []
 
     async def seed_messages() -> None:
         async with AsyncSessionLocal() as db_session:
+            async with db_session.begin():
+                await create_user(db_session, user_id=user_id, api_key=api_key)
             await create_message(
                 db_session,
                 session_id=session_id,
@@ -100,7 +104,7 @@ def test_evaluate_session_posts_transcript_to_vllm_and_returns_json(
 
     response = client.post(
         f"/api/v1/sessions/{session_id}/evaluate",
-        params={"user_id": user_id},
+        params={"api_key": api_key},
     )
 
     assert response.status_code == 200

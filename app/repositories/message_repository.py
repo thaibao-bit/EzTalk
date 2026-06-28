@@ -3,7 +3,28 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Message, MessageRole
+from app.db.models import Message, MessageRole, Session
+
+
+async def ensure_session(
+    session: AsyncSession,
+    *,
+    session_id: str,
+    user_id: str,
+    title: str = "Untitled",
+) -> Session:
+    """Create a session row for the user if it does not exist."""
+
+    existing = await session.get(Session, session_id)
+    if existing is not None:
+        if existing.user_id != user_id:
+            raise PermissionError("session belongs to another user")
+        return existing
+
+    chat_session = Session(id=session_id, user_id=user_id, title=title)
+    session.add(chat_session)
+    await session.flush()
+    return chat_session
 
 
 async def create_message(
@@ -13,9 +34,11 @@ async def create_message(
     user_id: str,
     role: MessageRole,
     content: str,
+    commit: bool = True,
 ) -> Message:
     """Insert and commit one chat message."""
 
+    await ensure_session(session, session_id=session_id, user_id=user_id)
     message = Message(
         session_id=session_id,
         user_id=user_id,
@@ -23,9 +46,39 @@ async def create_message(
         content=content,
     )
     session.add(message)
-    await session.commit()
-    await session.refresh(message)
+    await session.flush()
+    if commit:
+        await session.commit()
+        await session.refresh(message)
     return message
+
+
+async def create_conversation_turn(
+    session: AsyncSession,
+    *,
+    session_id: str,
+    user_id: str,
+    user_content: str,
+    assistant_content: str,
+) -> None:
+    """Persist one user/assistant turn inside the caller's transaction."""
+
+    await create_message(
+        session,
+        session_id=session_id,
+        user_id=user_id,
+        role=MessageRole.USER,
+        content=user_content,
+        commit=False,
+    )
+    await create_message(
+        session,
+        session_id=session_id,
+        user_id=user_id,
+        role=MessageRole.ASSISTANT,
+        content=assistant_content,
+        commit=False,
+    )
 
 
 async def list_recent_messages(

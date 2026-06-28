@@ -1,5 +1,6 @@
 """API and WebSocket regression tests."""
 
+import asyncio
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -7,6 +8,8 @@ import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.endpoints import chat as chat_endpoint
+from app.db.session import AsyncSessionLocal
+from app.repositories.auth_repository import create_user
 from main import app
 
 
@@ -16,6 +19,12 @@ def client() -> TestClient:
 
     with TestClient(app) as test_client:
         yield test_client
+
+
+async def _seed_user(user_id: str, api_key: str) -> None:
+    async with AsyncSessionLocal() as db_session:
+        async with db_session.begin():
+            await create_user(db_session, user_id=user_id, api_key=api_key)
 
 
 def test_root_describes_available_endpoints(client: TestClient) -> None:
@@ -45,6 +54,7 @@ def test_websocket_streams_chunks_and_preserves_history(
 ) -> None:
     session_id = f"test-session-{uuid4()}"
     user_id = f"user-{uuid4()}"
+    api_key = f"key-{uuid4()}"
     calls: list[list[dict[str, str]]] = []
 
     async def fake_stream(messages: list):
@@ -54,9 +64,10 @@ def test_websocket_streams_chunks_and_preserves_history(
             yield chunk
 
     monkeypatch.setattr(chat_endpoint, "generate_chat_response", fake_stream)
+    asyncio.run(_seed_user(user_id, api_key))
 
     with client.websocket_connect(
-        f"/ws/chat/{session_id}?user_id={user_id}"
+        f"/ws/chat/{session_id}?api_key={api_key}"
     ) as websocket:
         assert websocket.receive_json() == {
             "type": "connected",
@@ -126,7 +137,7 @@ def test_websocket_streams_chunks_and_preserves_history(
 
     response = client.get(
         f"/api/v1/sessions/{session_id}/messages",
-        params={"user_id": user_id},
+        params={"api_key": api_key},
     )
 
     assert response.status_code == 200
@@ -171,8 +182,14 @@ def test_websocket_streams_chunks_and_preserves_history(
 
 def test_websocket_returns_error_event_for_empty_message(client: TestClient) -> None:
     session_id = f"empty-message-session-{uuid4()}"
+    user_id = f"empty-message-user-{uuid4()}"
+    api_key = f"key-{uuid4()}"
 
-    with client.websocket_connect(f"/ws/chat/{session_id}") as websocket:
+    asyncio.run(_seed_user(user_id, api_key))
+
+    with client.websocket_connect(
+        f"/ws/chat/{session_id}?api_key={api_key}"
+    ) as websocket:
         assert websocket.receive_json()["type"] == "connected"
 
         websocket.send_text("   ")
@@ -185,15 +202,50 @@ def test_websocket_returns_error_event_for_empty_message(client: TestClient) -> 
         }
 
 
+def test_websocket_returns_auth_error_for_invalid_api_key(
+    client: TestClient,
+) -> None:
+    session_id = f"auth-error-session-{uuid4()}"
+
+    with client.websocket_connect(
+        f"/ws/chat/{session_id}?api_key=invalid"
+    ) as websocket:
+        assert websocket.receive_json() == {
+            "type": "error",
+            "session_id": session_id,
+            "code": "auth_error",
+            "message": "API key không hợp lệ hoặc đã hết hạn.",
+        }
+
+
 def test_get_session_messages_returns_empty_list_for_unknown_session(
     client: TestClient,
 ) -> None:
     session_id = f"unknown-session-{uuid4()}"
+    user_id = f"unknown-session-user-{uuid4()}"
+    api_key = f"key-{uuid4()}"
 
-    response = client.get(f"/api/v1/sessions/{session_id}/messages")
+    asyncio.run(_seed_user(user_id, api_key))
+
+    response = client.get(
+        f"/api/v1/sessions/{session_id}/messages",
+        params={"api_key": api_key},
+    )
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_get_session_messages_rejects_invalid_api_key(client: TestClient) -> None:
+    session_id = f"invalid-key-session-{uuid4()}"
+
+    response = client.get(
+        f"/api/v1/sessions/{session_id}/messages",
+        params={"api_key": "invalid"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid API key."}
 
 
 def test_session_messages_are_filtered_by_user_id(
@@ -203,14 +255,18 @@ def test_session_messages_are_filtered_by_user_id(
     session_id = f"shared-session-{uuid4()}"
     first_user_id = f"first-user-{uuid4()}"
     second_user_id = f"second-user-{uuid4()}"
+    first_api_key = f"key-{uuid4()}"
+    second_api_key = f"key-{uuid4()}"
 
     async def fake_stream(messages: list):
         yield f"Reply to {messages[-1]['content']}"
 
     monkeypatch.setattr(chat_endpoint, "generate_chat_response", fake_stream)
+    asyncio.run(_seed_user(first_user_id, first_api_key))
+    asyncio.run(_seed_user(second_user_id, second_api_key))
 
     with client.websocket_connect(
-        f"/ws/chat/{session_id}?user_id={first_user_id}"
+        f"/ws/chat/{session_id}-first?api_key={first_api_key}"
     ) as websocket:
         assert websocket.receive_json()["type"] == "connected"
         websocket.send_text("Hello from first user")
@@ -218,7 +274,7 @@ def test_session_messages_are_filtered_by_user_id(
         assert websocket.receive_json()["type"] == "assistant_done"
 
     with client.websocket_connect(
-        f"/ws/chat/{session_id}?user_id={second_user_id}"
+        f"/ws/chat/{session_id}-second?api_key={second_api_key}"
     ) as websocket:
         assert websocket.receive_json()["type"] == "connected"
         websocket.send_text("Hello from second user")
@@ -226,12 +282,12 @@ def test_session_messages_are_filtered_by_user_id(
         assert websocket.receive_json()["type"] == "assistant_done"
 
     first_response = client.get(
-        f"/api/v1/sessions/{session_id}/messages",
-        params={"user_id": first_user_id},
+        f"/api/v1/sessions/{session_id}-first/messages",
+        params={"api_key": first_api_key},
     )
     second_response = client.get(
-        f"/api/v1/sessions/{session_id}/messages",
-        params={"user_id": second_user_id},
+        f"/api/v1/sessions/{session_id}-second/messages",
+        params={"api_key": second_api_key},
     )
 
     assert [message["content"] for message in first_response.json()] == [
@@ -249,6 +305,8 @@ def test_websocket_returns_database_error_event_when_persistence_fails(
     monkeypatch,
 ) -> None:
     session_id = f"db-error-session-{uuid4()}"
+    user_id = f"db-error-user-{uuid4()}"
+    api_key = f"key-{uuid4()}"
 
     async def fake_stream(_messages: list):
         yield "This response cannot be saved."
@@ -257,13 +315,16 @@ def test_websocket_returns_database_error_event_when_persistence_fails(
         raise SQLAlchemyError("database is unavailable")
 
     monkeypatch.setattr(chat_endpoint, "generate_chat_response", fake_stream)
-    monkeypatch.setattr(chat_endpoint, "create_message", fail_create_message)
+    monkeypatch.setattr(chat_endpoint, "create_conversation_turn", fail_create_message)
+    asyncio.run(_seed_user(user_id, api_key))
 
-    with client.websocket_connect(f"/ws/chat/{session_id}") as websocket:
+    with client.websocket_connect(
+        f"/ws/chat/{session_id}?api_key={api_key}"
+    ) as websocket:
         assert websocket.receive_json() == {
             "type": "connected",
             "session_id": session_id,
-            "user_id": "guest",
+            "user_id": user_id,
             "message": "WebSocket connected.",
         }
 

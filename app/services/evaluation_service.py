@@ -4,10 +4,12 @@ from typing import Any
 import json
 
 import httpx
+from pydantic import ValidationError
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.repositories.message_repository import list_session_messages
+from app.schemas.evaluation import EvaluationResult
 
 
 EVALUATION_SYSTEM_PROMPT = """
@@ -89,8 +91,16 @@ async def evaluate_session(session_id: str, user_id: str) -> dict:
             response.raise_for_status()
             completion = response.json()
             content = completion["choices"][0]["message"]["content"]
-            return json.loads(content)
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            parsed = json.loads(content)
+            return EvaluationResult.model_validate(parsed).model_dump()
+    except (
+        httpx.HTTPError,
+        KeyError,
+        IndexError,
+        TypeError,
+        json.JSONDecodeError,
+        ValidationError,
+    ) as exc:
         raise EvaluationServiceError("vLLM returned an invalid evaluation") from exc
 
 
