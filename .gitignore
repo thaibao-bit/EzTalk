@@ -6,3 +6,7 @@ __pycache__/
 htmlcov/
 .env
 *.log
+data/
+*.sqlite
+*.sqlite3
+*.db

@@ -1,18 +1,35 @@
 """Application entrypoint for the EZTalk chat API."""
 
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+
 from fastapi import FastAPI
 
 from app.api.endpoints.chat import router as chat_router
+from app.api.endpoints.evaluation import router as evaluation_router
+from app.api.endpoints.sessions import router as sessions_router
+from app.db.session import init_db
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Initialize infrastructure required by the API process."""
+
+    await init_db()
+    yield
 
 
 app = FastAPI(
     title="EZTalk Chat API",
     description="Backend API for English-Vietnamese conversation practice.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Keeping endpoints in routers makes it easy to add more API modules later.
 app.include_router(chat_router)
+app.include_router(sessions_router)
+app.include_router(evaluation_router)
 
 
 @app.get("/", tags=["root"])

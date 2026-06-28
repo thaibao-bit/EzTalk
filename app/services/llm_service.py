@@ -2,10 +2,11 @@
 
 from collections.abc import AsyncIterator
 import json
-import os
 from typing import Any
 
 import httpx
+
+from app.core.config import get_settings
 
 
 DEFAULT_VLLM_BASE_URL = "http://localhost:8000/v1"
@@ -56,26 +57,14 @@ class VLLMService:
         timeout_seconds: float = 120.0,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.base_url = (
-            base_url
-            or os.getenv("VLLM_BASE_URL")
-            or os.getenv("LLM_API_URL")
-            or DEFAULT_VLLM_BASE_URL
-        ).rstrip("/")
-        self.model = (
-            model
-            or os.getenv("VLLM_MODEL")
-            or os.getenv("LLM_MODEL")
-            or DEFAULT_VLLM_MODEL
-        )
-        self.api_key = (
-            api_key
-            or os.getenv("VLLM_API_KEY")
-            or os.getenv("LLM_API_KEY")
-        )
+        settings = get_settings()
+        self.base_url = (base_url or settings.vllm_base_url).rstrip("/")
+        self.model = model or settings.vllm_model
+        self.api_key = api_key or settings.vllm_api_key
+        timeout = timeout_seconds if timeout_seconds != 120.0 else settings.vllm_timeout_seconds
         self.timeout = httpx.Timeout(
             connect=10.0,
-            read=timeout_seconds,
+            read=timeout,
             write=30.0,
             pool=10.0,
         )
