@@ -3,12 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: eztalk-api:local
+    image: ghcr.io/thaibao-bit/eztalk:local
     ports:
-      # Keep host port 8000 available for the local vLLM server.
-      - "${API_PORT:-8080}:8000"
+      # FastAPI is exposed on host port 8080; host port 8000 remains available
+      # for a local vLLM OpenAI-compatible server.
+      - "8080:8000"
     environment:
-      VLLM_BASE_URL: "${VLLM_BASE_URL:-http://host.docker.internal:8000/v1}"
+      # From inside Docker, host.docker.internal:8000 points to vLLM on the host.
+      VLLM_BASE_URL: "http://host.docker.internal:8000/v1"
       VLLM_MODEL: "${VLLM_MODEL:-default}"
       VLLM_API_KEY: "${VLLM_API_KEY:-}"
     extra_hosts:
