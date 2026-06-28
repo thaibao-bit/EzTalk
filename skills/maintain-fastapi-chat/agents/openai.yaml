@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain FastAPI Chat"
+  short_description: "Build and debug the FastAPI chat backend"
+  default_prompt: "Use $maintain-fastapi-chat to implement or debug the FastAPI WebSocket chat backend."

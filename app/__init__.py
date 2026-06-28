@@ -1,0 +1,1 @@
+"""EZTalk application package."""

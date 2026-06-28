@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test FastAPI Chat"
+  short_description: "Test WebSocket, HTTP, and LLM behavior"
+  default_prompt: "Use $test-fastapi-chat to add or run regression tests for the EZTalk backend."

@@ -1,0 +1,16 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: eztalk-api:local
+    ports:
+      # Keep host port 8000 available for the local vLLM server.
+      - "${API_PORT:-8080}:8000"
+    environment:
+      VLLM_BASE_URL: "${VLLM_BASE_URL:-http://host.docker.internal:8000/v1}"
+      VLLM_MODEL: "${VLLM_MODEL:-default}"
+      VLLM_API_KEY: "${VLLM_API_KEY:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
