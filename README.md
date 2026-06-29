@@ -12,7 +12,7 @@ Mobile/Web Client
    │ WebSocket /ws/chat/{session_id}?api_key=...
    │ HTTP      /api/v1/sessions/{session_id}/...
    ▼
-Load Balancer / Ingress
+Nginx Gateway / Ingress
    │
    ├───────────────┬───────────────┬───────────────┐
    ▼               ▼               ▼               │
@@ -243,13 +243,14 @@ docker compose -f docker-compose.prod.yml up --build --scale api=3 -d
 
 This starts:
 
+- `gateway`: Nginx reverse proxy and single public entrypoint.
 - `api`: scalable FastAPI/Gunicorn service.
-- `migrate`: one-shot DB initialization job.
+- `migrate`: one-shot Alembic migration job.
 - `redis`: Redis 7 Alpine for Pub/Sub.
 - `postgres`: Postgres 16 Alpine.
 - `pgbouncer`: connection pooler in front of Postgres.
 
-The `api` service uses `expose: 8080` instead of binding a fixed host port. This avoids port collisions when scaling multiple API replicas. In production, place a load balancer, ingress, Nginx, Traefik, or cloud service router in front of the API replicas.
+The `api` service uses `expose: 8080` instead of binding a fixed host port. This avoids port collisions when scaling multiple API replicas. The `gateway` service is the only public entrypoint and routes HTTP/WebSocket traffic to API replicas.
 
 ### Required Secret Manager Variables
 
@@ -271,6 +272,8 @@ These must be injected by CI/CD, platform environment variables, Docker secrets,
 | `PGBOUNCER_MAX_CLIENT_CONN` | no | PgBouncer max client connections. Defaults to `1000`. |
 | `PGBOUNCER_DEFAULT_POOL_SIZE` | no | PgBouncer default server pool size. Defaults to `50`. |
 | `PGBOUNCER_RESERVE_POOL_SIZE` | no | PgBouncer reserve pool size. Defaults to `10`. |
+| `GATEWAY_HTTP_PORT` | no | Host HTTP port exposed by Nginx. Defaults to `80`. |
+| `GATEWAY_HTTPS_PORT` | no | Host HTTPS port reserved for TLS termination. Defaults to `443`. |
 
 ### Example Production Startup
 
@@ -302,7 +305,11 @@ docker compose -f docker-compose.prod.yml up --build --scale api=3 -d
 
 ### Production Readiness Notes
 
-- The current `migrate` service calls SQLAlchemy `init_db()`. This is acceptable for the current schema bootstrap, but the next production-hardening step should replace it with Alembic migrations.
+- The `migrate` service runs Alembic:
+
+```txt
+alembic upgrade head
+```
 - API replicas do not run DB initialization on startup in production:
 
 ```txt

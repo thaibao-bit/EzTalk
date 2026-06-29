@@ -7,3 +7,5 @@ aiosqlite==0.22.1
 asyncpg==0.30.0
 gunicorn==23.0.0
 broadcaster[redis]==0.3.1
+alembic==1.17.2
+pydantic-settings==2.12.0

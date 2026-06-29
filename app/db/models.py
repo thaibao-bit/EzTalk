@@ -82,7 +82,11 @@ class Message(Base):
         server_default="guest",
     )
     role: Mapped[MessageRole] = mapped_column(
-        Enum(MessageRole, native_enum=False),
+        Enum(
+            MessageRole,
+            native_enum=False,
+            values_callable=lambda enum_cls: [role.value for role in enum_cls],
+        ),
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
