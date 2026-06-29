@@ -1,78 +1,115 @@
-"""Application settings loaded from environment variables.
+"""Environment-aware application settings."""
 
-The project intentionally keeps this layer lightweight for now: no extra
-settings dependency is required, but every runtime value still has one clear
-source of truth.
-"""
-
-from dataclasses import dataclass
+from functools import lru_cache
 import os
 
-
-@dataclass(frozen=True)
-class Settings:
-    """Runtime settings for the FastAPI chat backend."""
-
-    app_name: str = "EZTalk Chat API"
-    app_version: str = "0.1.0"
-    api_port: int = 8080
-    websocket_max_history_messages: int = 40
-    vllm_base_url: str = "http://localhost:8000/v1"
-    vllm_model: str = "default"
-    vllm_api_key: str | None = None
-    vllm_timeout_seconds: float = 120.0
-    database_url: str = "sqlite+aiosqlite:///./data/eztalk.db"
-    redis_url: str = "redis://localhost:6379/0"
-    redis_broadcast_enabled: bool = False
-    db_pool_size: int = 5
-    db_max_overflow: int = 10
-    run_db_init_on_startup: bool = True
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def get_settings() -> Settings:
-    """Create settings from environment variables.
+def _resolve_env_file() -> str:
+    """Return the dotenv file for the active environment."""
 
-    This function is intentionally simple and side-effect free, so tests can
-    override environment variables with ``monkeypatch`` and instantiate fresh
-    settings when needed.
-    """
+    app_env = os.getenv("APP_ENV", "development").lower()
+    return f".env.{app_env}"
 
-    return Settings(
-        api_port=_get_int("API_PORT", 8080),
-        websocket_max_history_messages=_get_int("WEBSOCKET_MAX_HISTORY_MESSAGES", 40),
-        vllm_base_url=(
-            os.getenv("VLLM_BASE_URL")
-            or os.getenv("LLM_API_URL")
-            or "http://localhost:8000/v1"
-        ),
-        vllm_model=os.getenv("VLLM_MODEL") or os.getenv("LLM_MODEL") or "default",
-        vllm_api_key=os.getenv("VLLM_API_KEY") or os.getenv("LLM_API_KEY"),
-        vllm_timeout_seconds=_get_float("VLLM_TIMEOUT_SECONDS", 120.0),
-        database_url=os.getenv("DATABASE_URL")
-        or "sqlite+aiosqlite:///./data/eztalk.db",
-        redis_url=os.getenv("REDIS_URL") or "redis://localhost:6379/0",
-        redis_broadcast_enabled=_get_bool("ENABLE_REDIS_BROADCAST", False),
-        db_pool_size=_get_int("DB_POOL_SIZE", 5),
-        db_max_overflow=_get_int("DB_MAX_OVERFLOW", 10),
-        run_db_init_on_startup=_get_bool("RUN_DB_INIT_ON_STARTUP", True),
+
+class Settings(BaseSettings):
+    """Runtime settings loaded from system env and environment-specific files."""
+
+    model_config = SettingsConfigDict(
+        env_file=_resolve_env_file(),
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
     )
 
+    APP_ENV: str = "development"
+    PROJECT_NAME: str = "EZTalk - AI English Coach (Dev)"
+    API_V1_STR: str = "/api/v1"
 
-def _get_int(name: str, default: int) -> int:
-    value = os.getenv(name)
-    return int(value) if value else default
+    DATABASE_URL: str = "sqlite+aiosqlite:///./data/eztalk.db"
+    RUN_DB_INIT_ON_STARTUP: bool = True
+
+    ENABLE_REDIS_BROADCAST: bool = False
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    VLLM_BASE_URL: str = "http://localhost:8000/v1"
+    VLLM_MODEL: str = "Qwen/Qwen2.5-7B-Instruct-AWQ"
+
+    API_PORT: int = 8080
+    APP_VERSION: str = "0.1.0"
+    WEBSOCKET_MAX_HISTORY_MESSAGES: int = 40
+    VLLM_API_KEY: str | None = None
+    LLM_API_KEY: str | None = None
+    VLLM_TIMEOUT_SECONDS: float = 120.0
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+
+    POSTGRES_PASSWORD: str | None = Field(default=None, exclude=True)
+
+    @property
+    def app_name(self) -> str:
+        return self.PROJECT_NAME
+
+    @property
+    def app_version(self) -> str:
+        return self.APP_VERSION
+
+    @property
+    def api_port(self) -> int:
+        return self.API_PORT
+
+    @property
+    def websocket_max_history_messages(self) -> int:
+        return self.WEBSOCKET_MAX_HISTORY_MESSAGES
+
+    @property
+    def database_url(self) -> str:
+        return self.DATABASE_URL
+
+    @property
+    def run_db_init_on_startup(self) -> bool:
+        return self.RUN_DB_INIT_ON_STARTUP
+
+    @property
+    def redis_broadcast_enabled(self) -> bool:
+        return self.ENABLE_REDIS_BROADCAST
+
+    @property
+    def redis_url(self) -> str:
+        return self.REDIS_URL
+
+    @property
+    def vllm_base_url(self) -> str:
+        return self.VLLM_BASE_URL
+
+    @property
+    def vllm_model(self) -> str:
+        return self.VLLM_MODEL
+
+    @property
+    def vllm_api_key(self) -> str | None:
+        return self.VLLM_API_KEY or self.LLM_API_KEY
+
+    @property
+    def vllm_timeout_seconds(self) -> float:
+        return self.VLLM_TIMEOUT_SECONDS
+
+    @property
+    def db_pool_size(self) -> int:
+        return self.DB_POOL_SIZE
+
+    @property
+    def db_max_overflow(self) -> int:
+        return self.DB_MAX_OVERFLOW
 
 
-def _get_float(name: str, default: float) -> float:
-    value = os.getenv(name)
-    return float(value) if value else default
+@lru_cache
+def get_settings() -> Settings:
+    """Return cached settings for the active environment."""
 
-
-def _get_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.lower() in {"1", "true", "yes", "on"}
+    return Settings()
 
 
 settings = get_settings()
